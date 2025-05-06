@@ -4,4 +4,4 @@
 
 //pulumi stack init prod
 
-npm run <stack-name>
+npm run stack-name
