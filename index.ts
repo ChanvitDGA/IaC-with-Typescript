@@ -5,16 +5,10 @@ import { ECRRepos } from "./modules/ecr/ecr";
 
 const config = new pulumi.Config();
 const env = config.require("environment");
-let network: any = undefined;
+const network = require(`./modules/vpc/network${env.charAt(0).toUpperCase() + env.slice(1)}`);
 
 // export const myGithubRoleArn = githubRoleArn;
 // export const myTaskRoleArn = taskRoleArn;
-
-if (env === "dev") {
-  network = require("./modules/vpc/networkDev");
-} else if (env === "prod") {
-  network = require("./modules/vpc/networkProd");
-}
 
 export const vpcId = network.vpc.id;
 export const publicSubnetsIds = network.publicSubnets.map((subnet: any) => subnet.id);
