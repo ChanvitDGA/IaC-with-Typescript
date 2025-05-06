@@ -1,0 +1,2 @@
+config:
+  IaCwithTypescript:environment: prod

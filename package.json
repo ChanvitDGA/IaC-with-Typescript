@@ -1,0 +1,18 @@
+{
+    "name": "IaCwithTypescript",
+    "main": "index.ts",
+    "devDependencies": {
+        "@types/node": "^18",
+        "typescript": "^5.0.0"
+    },
+    "scripts": {
+        "dev": "pulumi stack select dev && pulumi config set environment dev --stack dev && pulumi up",
+        "uat": "pulumi stack select uat && pulumi config set environment uat --stack uat && pulumi up",
+        "prod": "pulumi stack select prod && pulumi config set environment prod && pulumi up"
+    },
+    "dependencies": {
+        "@pulumi/aws": "^6.0.0",
+        "@pulumi/awsx": "^2.0.2",
+        "@pulumi/pulumi": "^3.113.0"
+    }
+}
