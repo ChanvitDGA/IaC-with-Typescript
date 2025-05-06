@@ -1,9 +1,15 @@
-pulumi stack init dev
+Init stack pulumi
 
-pulumi stack init uat
+```bash
+  pulumi stack init dev
+  pulumi stack init uat
+  pulumi stack init prod
+```
 
-pulumi stack init prod
+install package npm
 
-npm install
-
-npm run stack-name
+```bash
+  npm install
+  npm run <stack-name>
+```
+    
