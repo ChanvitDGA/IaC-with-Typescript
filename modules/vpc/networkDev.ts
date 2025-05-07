@@ -29,6 +29,8 @@ const privateSubnetNames = [
   "miniapps-container-ap-southeast-1b",
   "miniapps-container-ap-southeast-1c",
 ];
+const targetGroupPort = 80;
+const ListenerPort = [80, 443];
 
 // สร้าง VPC
 const vpc = new aws.ec2.Vpc(`${name}-vpc`, {
@@ -169,6 +171,78 @@ const defaultRouteTable = new aws.ec2.DefaultRouteTable(`${name}-default`, {
     Name: `${name}-default`,
     ENVIRONMENT: env,
   },
+});
+
+const defaultSg = aws.ec2.getSecurityGroupOutput({
+  filters: [
+    { name: "vpc-id", values: [vpc.id] },
+    { name: "group-name", values: ["default"] },
+  ],
+});
+
+const renamedDefaultSg = new aws.ec2.Tag("rename-default-sg", {
+  resourceId: defaultSg.id,
+  key: "Name",
+  value: `${name}-default`,
+});
+
+// === Security Group ===
+const lbSecurityGroup = new aws.ec2.SecurityGroup(`alb-${env}-sg`, {
+  name: `alb-${env}-sg`,
+  description: "Allow all traffic from anywhere",
+  vpcId: vpc.id,
+  ingress: [
+    {
+      protocol: "-1", // -1 = all protocols
+      fromPort: 0,
+      toPort: 0,
+      cidrBlocks: ["0.0.0.0/0"],
+    },
+  ],
+  egress: [
+    {
+      protocol: "-1",
+      fromPort: 0,
+      toPort: 0,
+      cidrBlocks: ["0.0.0.0/0"],
+    },
+  ],
+});
+
+// สร้าง Load Balancer
+const alb = new aws.lb.LoadBalancer(`${name}-lb`, {
+  name: `${name.split("-")[0]}-alb-${env}`,
+  internal: false,
+  loadBalancerType: "application",
+  securityGroups: [lbSecurityGroup.id],
+  subnets: publicSubnets.map((subnet) => subnet.id),
+}, { dependsOn: [lbSecurityGroup] });
+
+// // สร้าง Target Group
+// const targetGroup = new aws.lb.TargetGroup(`${name}-tg`, {
+//   port: targetGroupPort,
+//   protocol: "HTTP",
+//   vpcId: vpc.id,
+//   targetType: "instance",
+// });
+
+// สร้าง Listener
+const listener = ListenerPort.map((port) => {
+  return new aws.lb.Listener(`${name}-listener-${port}`, {
+    loadBalancerArn: alb.arn,
+    port: port,
+    protocol: "HTTP",
+    defaultActions: [
+      {
+        type: "fixed-response",
+        fixedResponse: {
+          contentType: "application/json",
+          messageBody: JSON.stringify({ statusCode: 404 }),
+          statusCode: "404",
+        },
+      },
+    ],
+  });
 });
 
 export { vpc, natGw, publicSubnets, privateSubnets, databaseSubnets };

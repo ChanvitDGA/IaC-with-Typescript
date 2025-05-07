@@ -19,8 +19,8 @@ const privateSubnetsCidr = [
   "100.64.16.0/20",
   "100.64.32.0/20",
 ];
-const databaseSubnetsCidr  = ["10.0.7.0/24", "10.0.8.0/24", "10.0.9.0/24"]
-const azs = ["a", "b", "c"].map(suffix => `${region}${suffix}`);
+const databaseSubnetsCidr = ["10.0.7.0/24", "10.0.8.0/24", "10.0.9.0/24"];
+const azs = ["a", "b", "c"].map((suffix) => `${region}${suffix}`);
 const privateSubnetNames = [
   "miniapps-private-ap-southeast-1a",
   "miniapps-private-ap-southeast-1b",
@@ -29,6 +29,8 @@ const privateSubnetNames = [
   "miniapps-container-ap-southeast-1b",
   "miniapps-container-ap-southeast-1c",
 ];
+const targetGroupPort = 80;
+const ListenerPort = [80, 443];
 
 // สร้าง VPC
 const vpc = new aws.ec2.Vpc(`${name}-vpc`, {
@@ -76,18 +78,16 @@ const privateSubnets = privateSubnetsCidr.map((cidr, index) => {
 });
 
 // === Database Subnets ===
-const databaseSubnets = databaseSubnetsCidr.map(
-  (cidr, i) => {
-    return new aws.ec2.Subnet(`db-subnet-${i}`, {
-      vpcId: vpc.id,
-      cidrBlock: cidr,
-      availabilityZone: azs[i],
-      tags: {
-        Name: `${name}-db-${azs[i]}`,
-      },
-    });
-  }
-);
+const databaseSubnets = databaseSubnetsCidr.map((cidr, i) => {
+  return new aws.ec2.Subnet(`db-subnet-${i}`, {
+    vpcId: vpc.id,
+    cidrBlock: cidr,
+    availabilityZone: azs[i],
+    tags: {
+      Name: `${name}-db-${azs[i]}`,
+    },
+  });
+});
 
 // === Internet Gateway สำหรับ Public Subnet ===
 const igw = new aws.ec2.InternetGateway(`${name}-igw`, {
@@ -99,19 +99,23 @@ const igw = new aws.ec2.InternetGateway(`${name}-igw`, {
 });
 
 // === Elastic IP สำหรับ NAT Gateway ===
-const natEips: aws.ec2.Eip[] = azs.map((az, i) => new aws.ec2.Eip(`${name}-nat-eip-${az}`, {
-  domain: "vpc",
-}));
+const natEips: aws.ec2.Eip[] = azs.map(
+  (az, i) =>
+    new aws.ec2.Eip(`${name}-nat-eip-${az}`, {
+      domain: "vpc",
+    })
+);
 
 // === NAT Gateway (Single NAT) ===
-const natGws: aws.ec2.NatGateway[] = azs.map((az, i) =>
-  new aws.ec2.NatGateway(`${name}-nat-gw-${az}`, {
-    allocationId: natEips[i].id,
-    subnetId: publicSubnets[i].id, // NAT ต้องอยู่ใน public subnet
-    tags: {
-      Name: `${name}-${az}`,
-    },
-  })
+const natGws: aws.ec2.NatGateway[] = azs.map(
+  (az, i) =>
+    new aws.ec2.NatGateway(`${name}-nat-gw-${az}`, {
+      allocationId: natEips[i].id,
+      subnetId: publicSubnets[i].id, // NAT ต้องอยู่ใน public subnet
+      tags: {
+        Name: `${name}-${az}`,
+      },
+    })
 );
 
 // === Routing Tables ===
@@ -125,7 +129,7 @@ const publicRt = new aws.ec2.RouteTable("public-rt", {
     },
   ],
   tags: {
-    Name: `${name}-public`
+    Name: `${name}-public`,
   },
 });
 
@@ -137,17 +141,20 @@ publicSubnets.forEach((subnet, i) => {
 });
 
 // Private route table (NAT Gateway)
-const privateRouteTables = azs.map((az, i) =>
-  new aws.ec2.RouteTable(`${name}-private-rt-${az}`, {
-    vpcId: vpc.id,
-    routes: [{
-      cidrBlock: "0.0.0.0/0",
-      natGatewayId: natGws[i].id,
-    }],
-    tags: {
-      Name: `${name}-private-${az}`,
-    },
-  })
+const privateRouteTables = azs.map(
+  (az, i) =>
+    new aws.ec2.RouteTable(`${name}-private-rt-${az}`, {
+      vpcId: vpc.id,
+      routes: [
+        {
+          cidrBlock: "0.0.0.0/0",
+          natGatewayId: natGws[i].id,
+        },
+      ],
+      tags: {
+        Name: `${name}-private-${az}`,
+      },
+    })
 );
 
 privateSubnets.forEach((subnet, i) => {
@@ -183,4 +190,76 @@ const defaultRouteTable = new aws.ec2.DefaultRouteTable(`${name}-default`, {
   },
 });
 
-export { vpc, publicSubnets, privateSubnets, databaseSubnets };
+const defaultSg = aws.ec2.getSecurityGroupOutput({
+  filters: [
+    { name: "vpc-id", values: [vpc.id] },
+    { name: "group-name", values: ["default"] },
+  ],
+});
+
+const renamedDefaultSg = new aws.ec2.Tag("rename-default-sg", {
+  resourceId: defaultSg.id,
+  key: "Name",
+  value: `${name}-default`,
+});
+
+// === Security Group ===
+const lbSecurityGroup = new aws.ec2.SecurityGroup(`alb-${env}-sg`, {
+  name: `alb-${env}-sg`,
+  description: "Allow all traffic from anywhere",
+  vpcId: vpc.id,
+  ingress: [
+    {
+      protocol: "-1", // -1 = all protocols
+      fromPort: 0,
+      toPort: 0,
+      cidrBlocks: ["0.0.0.0/0"],
+    },
+  ],
+  egress: [
+    {
+      protocol: "-1",
+      fromPort: 0,
+      toPort: 0,
+      cidrBlocks: ["0.0.0.0/0"],
+    },
+  ],
+});
+
+// สร้าง Load Balancer
+const alb = new aws.lb.LoadBalancer(`${name}-lb`, {
+  name: `${name.split("-")[0]}-alb-${env}`,
+  internal: false,
+  loadBalancerType: "application",
+  securityGroups: [lbSecurityGroup.id],
+  subnets: publicSubnets.map((subnet) => subnet.id),
+}, { dependsOn: [lbSecurityGroup] });
+
+// // สร้าง Target Group
+// const targetGroup = new aws.lb.TargetGroup(`${name}-tg`, {
+//   port: targetGroupPort,
+//   protocol: "HTTP",
+//   vpcId: vpc.id,
+//   targetType: "instance",
+// });
+
+// สร้าง Listener
+const listener = ListenerPort.map((port) => {
+  return new aws.lb.Listener(`${name}-listener-${port}`, {
+    loadBalancerArn: alb.arn,
+    port: port,
+    protocol: "HTTP",
+    defaultActions: [
+      {
+        type: "fixed-response",
+        fixedResponse: {
+          contentType: "application/json",
+          messageBody: JSON.stringify({ statusCode: 404 }),
+          statusCode: "404",
+        },
+      },
+    ],
+  });
+});
+
+export { vpc, publicSubnets, privateSubnets, databaseSubnets, defaultSg };
