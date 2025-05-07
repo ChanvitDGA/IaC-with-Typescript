@@ -6,7 +6,7 @@ Init stack pulumi
   pulumi stack init prod
 ```
 
-install package npm
+Install package npm
 
 ```bash
   npm install
